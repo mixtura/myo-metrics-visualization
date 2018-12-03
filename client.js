@@ -2,34 +2,19 @@ const visContainerEl = document.getElementById('visualization');
 const processIdsSelectEl = document.getElementById('processIds');
 const measurementsSelectEl = document.getElementById('measurements');
 const itemsContentContentEl = document.getElementById('itemsContent');
-const timeline = new Timeline(onItemsSelect);
-
-function onItemsSelect(items) {
+const timeline = new Timeline(items => {
   const data = items.map(x => ({
     event: x.EventId,
     start: x.start,
     data: JSON.parse(x.CustomData)
   }));
 
-  const contentTextNode = document.createTextNode(JSON.stringify(data, null, 40));
+  const prettyData = JSON.stringify(data, null, 40);
+  const contentTextNode = document.createTextNode(prettyData);
 
   itemsContentContentEl.innerHTML = '';
   itemsContentContentEl.appendChild(contentTextNode);
-}
-
-const fulfillOptions = (selectEl, data) => {
-  // append empty
-  selectEl.appendChild(document.createElement('option'));
-
-  data.forEach(x => {
-    let option = document.createElement('option');
-
-    option.setAttribute("value", x);
-    option.innerText = x;
-
-    selectEl.appendChild(option);
-  });
-}
+});
 
 const buildQueryString = params => 
   Object
@@ -82,39 +67,58 @@ bindEvents(processIdsSelectEl, measurementsSelectEl);
 
 function bindEvents(processIdsSelectEl, measurementsSelectEl) {
   const getSelectedValue = (target) => target.options[target.selectedIndex].value;
-  const getDropdownLoader = (target) => (values) => fulfillOptions(target, values)
+  const getDropdownLoader = (target) => (values) => fulfillDropdown(target, values);
 
   document.addEventListener(
     'DOMContentLoaded', 
-    () => fetchMeasurements().then(getDropdownLoader(measurementsSelectEl))
-  );
+    () => {
+      const measurementsDropdownLoader = getDropdownLoader(measurementsSelectEl);
+      fetchMeasurements().then(measurementsDropdownLoader);
+    });
 
-  measurementsSelectEl.addEventListener('change', () => {
-    const measurement = getSelectedValue(measurementsSelectEl);
-
-    processIdsSelectEl.innerHTML = '';
-
-    fetchProcessIds(measurement).then(getDropdownLoader(processIdsSelectEl));
-  });
+  measurementsSelectEl.addEventListener(
+    'change', 
+    () => {
+      const measurement = getSelectedValue(measurementsSelectEl);
+      const processIdsDropdownLoader = getDropdownLoader(processIdsSelectEl);
+      processIdsSelectEl.innerHTML = '';
+      fetchProcessIds(measurement).then(processIdsDropdownLoader);
+    });
 
   let loadDataIntervalHandler;
 
-  processIdsSelectEl.addEventListener('change', () => {
-    let processId = getSelectedValue(processIdsSelectEl);
-    let measurement = getSelectedValue(measurementsSelectEl);
+  processIdsSelectEl.addEventListener(
+    'change', 
+    () => {
+      let processId = getSelectedValue(processIdsSelectEl);
+      let measurement = getSelectedValue(measurementsSelectEl);
 
-    timeline.clear();
+      timeline.clear();
 
-    let from = null;
-    let loadData = () => fetchData(measurement, processId, from)
-      .then(data => {
-        from = data[data.length - 1].time;
-        timeline.setData(data)
-      });
+      let from = null;
+      let loadData = () => fetchData(measurement, processId, from)
+        .then(data => {
+          from = data[data.length - 1].time;
+          timeline.setData(data)
+        });
 
-    loadDataIntervalHandler && clearInterval(loadDataIntervalHandler);
-    loadDataIntervalHandler = setInterval(() => loadData(), 3000);
-    loadData();
+      loadDataIntervalHandler && clearInterval(loadDataIntervalHandler);
+      loadDataIntervalHandler = setInterval(() => loadData(), 3000);
+      loadData();
+    });
+}
+
+function fulfillDropdown(selectEl, data) {
+  // append empty
+  selectEl.appendChild(document.createElement('option'));
+
+  data.forEach(x => {
+    let option = document.createElement('option');
+
+    option.setAttribute("value", x);
+    option.innerText = x;
+
+    selectEl.appendChild(option);
   });
 }
 
@@ -140,10 +144,10 @@ function Timeline(onItemsSelect) {
   };
 
   this.setData = (data) => {
-    if (!this.items) {
-      init(data);
+    if (this.items) {
+      data.forEach(x => this.items.update(x));      
     } else {
-      data.forEach(x => this.items.update(x));
+      init(data);
     }
   };
 }
