@@ -2,8 +2,9 @@ const visContainerEl = document.getElementById('visualization');
 const processIdsSelectEl = document.getElementById('processIds');
 const measurementsSelectEl = document.getElementById('measurements');
 const itemsContentContentEl = document.getElementById('itemsContent');
+const timeline = new Timeline(onItemsSelect);
 
-const onItemsSelect = (items) => {
+function onItemsSelect(items) {
   const data = items.map(x => ({
     event: x.EventId,
     start: x.start,
@@ -15,35 +16,6 @@ const onItemsSelect = (items) => {
   itemsContentContentEl.innerHTML = '';
   itemsContentContentEl.appendChild(contentTextNode);
 }
-
-const timeline = (function timeline(onItemsSelect) {
-  const timeline = {};
-  const options = {
-    height: 500,
-    multiselect: true
-  };
-
-  timeline.clear = () => {
-    if (timeline.items) {
-      timeline.items.clear();
-    }
-  }
-
-  timeline.setData = (data) => {
-    if (!timeline.items) {
-      timeline.items = new vis.DataSet(data);
-      timeline.timeline = new vis.Timeline(visContainerEl, timeline.items, options);
-      timeline.timeline.on('select', (props) => {
-        let items = timeline.items.get().filter(x => props.items.includes(x.id));
-        onItemsSelect(items);
-      });
-    } else {
-      data.forEach(x => timeline.items.update(x));
-    }
-  }
-
-  return timeline;
-})(onItemsSelect);
 
 const fulfillOptions = (selectEl, data) => {
   // append empty
@@ -66,7 +38,7 @@ const buildQueryString = params =>
     .map(key => `${key}=${params[key]}`)
     .join('&');
 
-const loadMeasurements = (measurementsSelectEl) => {
+const fetchMeasurements = () =>
   fetch('/api/measurements')
     .then(response => {
       if (response.status !== 200) {
@@ -74,12 +46,9 @@ const loadMeasurements = (measurementsSelectEl) => {
       }
       return response;
     })
-    .then(response => response.json())
-    .then(parsedResponse =>
-      fulfillOptions(measurementsSelectEl, parsedResponse));
-}
+    .then(response => response.json());
 
-const loadProcessIds = (processIdsSelectEl, measurement) => {
+const fetchProcessIds = (measurement) => 
   fetch(`/api/processids?measurement=${measurement}`)
     .then(response => {
       if (response.status !== 200) {
@@ -87,37 +56,7 @@ const loadProcessIds = (processIdsSelectEl, measurement) => {
       }
       return response;
     })
-    .then(response => response.json())
-    .then(parsedResponse =>
-      fulfillOptions(processIdsSelectEl, parsedResponse));
-}
-
-const prepareData = raw => {
-  const groupBy = (list, keyGetter) => {
-    const map = new Map();
-
-    list.forEach((item) => {
-      const key = keyGetter(item);
-      const collection = map.get(key);
-      if (!collection) {
-        map.set(key, [item]);
-      } else {
-        collection.push(item);
-      }
-    });
-
-    return Array.from(map.values());
-  }
-
-  return groupBy(raw, x => x.ProcessId)
-    .flatMap(events => 
-      events.map(x => ({ 
-        ...x, 
-        id: x.time, 
-        start: x.time, 
-        content: x.EventId })
-    ));
-}
+    .then(response => response.json());
 
 const fetchData = (measurement, processId, from) =>
   fetch(`/api/logs?${buildQueryString({measurement, processId, from})}`)
@@ -130,17 +69,32 @@ const fetchData = (measurement, processId, from) =>
     .then(response => response.json())
     .then(prepareData)
     .catch(error => console.log(error));
+  
+const prepareData = raw => 
+  raw.map(x => ({ 
+    ...x, 
+    id: x.time, 
+    start: x.time, 
+    content: x.EventId })
+  );
+
+bindEvents(processIdsSelectEl, measurementsSelectEl);
 
 function bindEvents(processIdsSelectEl, measurementsSelectEl) {
   const getSelectedValue = (target) => target.options[target.selectedIndex].value;
+  const getDropdownLoader = (target) => (values) => fulfillOptions(target, values)
 
-  document.addEventListener('DOMContentLoaded', () => loadMeasurements(measurementsSelectEl));
+  document.addEventListener(
+    'DOMContentLoaded', 
+    () => fetchMeasurements().then(getDropdownLoader(measurementsSelectEl))
+  );
 
   measurementsSelectEl.addEventListener('change', () => {
     const measurement = getSelectedValue(measurementsSelectEl);
 
     processIdsSelectEl.innerHTML = '';
-    loadProcessIds(processIdsSelectEl, measurement);
+
+    fetchProcessIds(measurement).then(getDropdownLoader(processIdsSelectEl));
   });
 
   let loadDataIntervalHandler;
@@ -159,8 +113,37 @@ function bindEvents(processIdsSelectEl, measurementsSelectEl) {
       });
 
     loadDataIntervalHandler && clearInterval(loadDataIntervalHandler);
-    loadDataIntervalHandler = setInterval(() => loadData(), 1000);
+    loadDataIntervalHandler = setInterval(() => loadData(), 3000);
+    loadData();
   });
 }
 
-bindEvents(processIdsSelectEl, measurementsSelectEl);
+function Timeline(onItemsSelect) {
+  const options = {
+    height: 500,
+    multiselect: true
+  };
+
+  const init = (data) => {
+    this.items = new vis.DataSet(data);
+      this.timeline = new vis.Timeline(visContainerEl, this.items, options);
+      this.timeline.on('select', (props) => {
+        const items = this.items.get().filter(x => props.items.includes(x.id));
+        onItemsSelect(items);
+      });
+  };
+
+  this.clear = () => {
+    if (this.items) {
+      this.items.clear();
+    }
+  };
+
+  this.setData = (data) => {
+    if (!this.items) {
+      init(data);
+    } else {
+      data.forEach(x => this.items.update(x));
+    }
+  };
+}
